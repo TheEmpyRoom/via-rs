@@ -1,0 +1,10 @@
+[application]
+name = "via-rs"
+default_platform = "desktop"
+
+[web.app]
+title = "VIA-RS"
+
+[web.watcher]
+reload_html = true
+watch_path = ["src", "assets", "public", "index.html"]
