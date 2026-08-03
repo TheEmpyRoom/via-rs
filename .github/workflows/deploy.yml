@@ -36,7 +36,10 @@ jobs:
 
 
       - name: Build Web App
-        run: dx build --platform web --release
+        run: |
+          dx build --platform web --release --base-path /via-rs/
+          touch target/dx/via-rs/release/web/public/.nojekyll
+
 
       - name: Upload GitHub Pages Artifact
         uses: actions/upload-pages-artifact@v3
