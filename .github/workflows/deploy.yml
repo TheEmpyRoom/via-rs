@@ -29,8 +29,11 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Install Dioxus CLI
-        run: cargo install dioxus-cli --version 0.7.10 --locked
+      - name: Install Dioxus CLI (prebuilt binary)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: dioxus-cli@0.7.10
+
 
       - name: Build Web App
         run: dx build --platform web --release
