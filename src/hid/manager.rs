@@ -44,7 +44,7 @@ pub async fn request_webhid_device() -> Result<Option<KeyboardInfo>, String> {
             if (!navigator.hid) {
                 throw new Error("WebHID is not supported in this browser. Please use Chrome, Edge, Opera, or Brave.");
             }
-            const devices = await navigator.hid.requestDevice({ filters: [] });
+            const devices = await navigator.hid.requestDevice({ filters: [{ usagePage: 0xFF60, usage: 0x0061 }] });
             if (!devices || devices.length === 0) return null;
             const dev = devices[0];
             if (!dev.opened) {
@@ -54,16 +54,19 @@ pub async fn request_webhid_device() -> Result<Option<KeyboardInfo>, String> {
             window._webhid_via_send = async function(cmdByte, dataArray) {
                 if (!window._webhid_device) throw new Error("No WebHID device connected");
                 if (!window._webhid_device.opened) await window._webhid_device.open();
+                console.log('[WebHID] sendCmd:', cmdByte, 'data:', dataArray, 'device opened:', window._webhid_device.opened);
 
                 return new Promise((resolve, reject) => {
                     let handler;
                     const timeout = setTimeout(() => {
                         window._webhid_device.removeEventListener("inputreport", handler);
+                        console.error('[WebHID] TIMEOUT for cmd:', cmdByte);
                         reject(new Error("WebHID timeout waiting for command " + cmdByte));
                     }, 1500);
 
                     handler = (e) => {
                         const bytes = new Uint8Array(e.data.buffer, e.data.byteOffset, e.data.byteLength);
+                        console.log('[WebHID] inputreport received, reportId:', e.reportId, 'bytes:', Array.from(bytes).slice(0, 8), 'expecting cmd:', cmdByte);
                         if (bytes.length > 0) {
                             let start = -1;
                             if (bytes[0] === cmdByte) {
@@ -77,6 +80,8 @@ pub async fn request_webhid_device() -> Result<Option<KeyboardInfo>, String> {
                                 const arr = new Uint8Array(32);
                                 arr.set(bytes.subarray(start, Math.min(bytes.length, start + 32)));
                                 resolve(Array.from(arr));
+                            } else {
+                                console.warn('[WebHID] inputreport did not match cmd:', cmdByte, 'got byte[0]:', bytes[0]);
                             }
                         }
                     };
@@ -89,14 +94,19 @@ pub async fn request_webhid_device() -> Result<Option<KeyboardInfo>, String> {
                             report[1 + i] = dataArray[i];
                         }
                     }
+                    console.log('[WebHID] sending report:', Array.from(report).slice(0, 8));
 
-                    window._webhid_device.sendReport(0, report).catch(err => {
+                    window._webhid_device.sendReport(0, report).then(() => {
+                        console.log('[WebHID] sendReport success for cmd:', cmdByte);
+                    }).catch(err => {
                         clearTimeout(timeout);
                         window._webhid_device.removeEventListener("inputreport", handler);
+                        console.error('[WebHID] sendReport error:', err);
                         reject(err);
                     });
                 });
             };
+
 
 
             return {
