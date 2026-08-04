@@ -56,12 +56,13 @@ pub async fn request_webhid_device() -> Result<Option<KeyboardInfo>, String> {
                 if (!window._webhid_device.opened) await window._webhid_device.open();
 
                 return new Promise((resolve, reject) => {
+                    let handler;
                     const timeout = setTimeout(() => {
-                        window._webhid_device.oninputreport = null;
+                        window._webhid_device.removeEventListener("inputreport", handler);
                         reject(new Error("WebHID timeout waiting for command " + cmdByte));
                     }, 1500);
 
-                    window._webhid_device.oninputreport = (e) => {
+                    handler = (e) => {
                         const bytes = new Uint8Array(e.data.buffer, e.data.byteOffset, e.data.byteLength);
                         if (bytes.length > 0) {
                             let start = -1;
@@ -72,13 +73,14 @@ pub async fn request_webhid_device() -> Result<Option<KeyboardInfo>, String> {
                             }
                             if (start >= 0) {
                                 clearTimeout(timeout);
-                                window._webhid_device.oninputreport = null;
+                                window._webhid_device.removeEventListener("inputreport", handler);
                                 const arr = new Uint8Array(32);
                                 arr.set(bytes.subarray(start, Math.min(bytes.length, start + 32)));
                                 resolve(Array.from(arr));
                             }
                         }
                     };
+                    window._webhid_device.addEventListener("inputreport", handler);
 
                     const report = new Uint8Array(32);
                     report[0] = cmdByte;
@@ -90,11 +92,12 @@ pub async fn request_webhid_device() -> Result<Option<KeyboardInfo>, String> {
 
                     window._webhid_device.sendReport(0, report).catch(err => {
                         clearTimeout(timeout);
-                        window._webhid_device.oninputreport = null;
+                        window._webhid_device.removeEventListener("inputreport", handler);
                         reject(err);
                     });
                 });
             };
+
 
             return {
                 vendorId: dev.vendorId,
