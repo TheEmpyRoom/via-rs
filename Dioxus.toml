@@ -7,4 +7,4 @@ title = "VIA-RS"
 
 [web.watcher]
 reload_html = true
-watch_path = ["src", "assets", "public", "index.html"]
+watch_pah = ["src", "assets", "public", "layouts", "index.html"]
