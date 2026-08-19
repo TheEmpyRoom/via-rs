@@ -1448,7 +1448,14 @@ pub fn App() -> Element {
                                                             }
                                                         }
                                                     },
-                                                    span { class: "key-matrix-corner", "{matrix_row},{matrix_col}" }
+                                                      {
+                                                          let code_opt = layer_keycodes.read().get(&(matrix_row as u8, matrix_col as u8)).copied();
+                                                          if code_opt.unwrap_or(0) != 0 {
+                                                              rsx! { span { class: "key-matrix-corner", "{matrix_row},{matrix_col}" } }
+                                                          } else {
+                                                              rsx! { span {} }
+                                                          }
+                                                      }
                                                     {
                                                         let code_opt = layer_keycodes.read().get(&(matrix_row as u8, matrix_col as u8)).copied();
                                                         let label_text = if let Some(code) = code_opt {
