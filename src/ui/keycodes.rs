@@ -228,6 +228,15 @@ pub fn get_keycode_label(code: u16, via_def: Option<&ViaDefinition>) -> String {
     }
     
     // Custom VIA keycodes
+    if code >= 0x7E00 && code <= 0x7E3F {
+        if let Some(def) = via_def {
+            let idx = (code - 0x7E00) as usize;
+            if idx < def.custom_keycodes.len() {
+                return def.custom_keycodes[idx].short_name.clone();
+            }
+        }
+        return format!("USER{:02}", code - 0x7E00);
+    }
     if code >= 0x5C00 && code <= 0x5CFF {
         if let Some(def) = via_def {
             let idx = (code - 0x5C00) as usize;
@@ -236,6 +245,15 @@ pub fn get_keycode_label(code: u16, via_def: Option<&ViaDefinition>) -> String {
             }
         }
         return format!("USER{:02}", code - 0x5C00);
+    }
+    if code >= 0x7E40 && code <= 0x7E7F {
+        if let Some(def) = via_def {
+            let idx = (code - 0x7E40) as usize;
+            if idx < def.custom_keycodes.len() {
+                return def.custom_keycodes[idx].short_name.clone();
+            }
+        }
+        return format!("USER{:02}", code - 0x7E40);
     }
 
     format!("0x{:04X}", code)
@@ -296,6 +314,15 @@ pub fn format_keycode_for_any_input(code: u16, via_def: Option<&ViaDefinition>) 
     }
 
     // 4. Custom VIA keycodes: USER00, USER01... or short_name
+    if code >= 0x7E00 && code <= 0x7E3F {
+        if let Some(def) = via_def {
+            let idx = (code - 0x7E00) as usize;
+            if idx < def.custom_keycodes.len() {
+                return def.custom_keycodes[idx].short_name.clone();
+            }
+        }
+        return format!("USER{:02}", code - 0x7E00);
+    }
     if code >= 0x5C00 && code <= 0x5CFF {
         if let Some(def) = via_def {
             let idx = (code - 0x5C00) as usize;
@@ -304,6 +331,15 @@ pub fn format_keycode_for_any_input(code: u16, via_def: Option<&ViaDefinition>) 
             }
         }
         return format!("USER{:02}", code - 0x5C00);
+    }
+    if code >= 0x7E40 && code <= 0x7E7F {
+        if let Some(def) = via_def {
+            let idx = (code - 0x7E40) as usize;
+            if idx < def.custom_keycodes.len() {
+                return def.custom_keycodes[idx].short_name.clone();
+            }
+        }
+        return format!("USER{:02}", code - 0x7E40);
     }
 
     // 5. Special QMK keycodes
@@ -639,10 +675,10 @@ fn find_keycode_by_alias(upper: &str, via_def: Option<&ViaDefinition>) -> Option
         _ => {}
     }
 
-    if upper.starts_with("USER") {
+    if upper.starts_with("USER") && upper.len() >= 6 {
         if let Ok(idx) = upper[4..].parse::<u16>() {
             if idx <= 31 {
-                return Some(0x5C00 + idx);
+                return Some(0x7E00 + idx);
             }
         }
     }
@@ -650,7 +686,7 @@ fn find_keycode_by_alias(upper: &str, via_def: Option<&ViaDefinition>) -> Option
     if let Some(def) = via_def {
         for (idx, custom) in def.custom_keycodes.iter().enumerate() {
             if custom.short_name.to_uppercase() == upper || custom.title.to_uppercase() == upper {
-                return Some(0x5C00 + idx as u16);
+                return Some(0x7E00 + idx as u16);
             }
         }
     }

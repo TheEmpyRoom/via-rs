@@ -940,19 +940,29 @@ pub fn App() -> Element {
                                                 }
                                                 selected_device.set(Some(dev.clone()));
                                                 status.set(format!("Connected to {}", dev.product_string));
-
-                                                if let Some((saved, src)) = crate::layout::storage::get_layout_with_source(dev.vendor_id, dev.product_id) {
-                                                    *via_def.write() = Some(saved.clone());
-                                                    layout_source.set(src);
-                                                    let p_keys = crate::layout::kle::parse_kle(&saved.layouts.keymap);
-                                                    physical_keys.set(p_keys.clone());
-                                                    status.set(format!("Connected to {}", dev.product_string));
-                                                    reload_layer(*active_layer.read(), dev.path.clone(), p_keys, layer_keycodes.clone(), is_loading_layer.clone(), status.clone());
-                                                } else {
-                                                    *via_def.write() = None;
-                                                    layout_source.set(crate::layout::storage::LayoutSource::None);
-                                                    physical_keys.set(Vec::new());
-                                                }
+                                                
+                                                let dev_layout_clone = dev.clone();
+                                                let mut via_def_sig = via_def.clone();
+                                                let mut layout_source_sig = layout_source.clone();
+                                                let mut physical_keys_sig = physical_keys.clone();
+                                                let mut status_sig = status.clone();
+                                                let active_layer_sig = active_layer.clone();
+                                                let layer_keycodes_sig = layer_keycodes.clone();
+                                                let is_loading_layer_sig = is_loading_layer.clone();
+                                                spawn(async move {
+                                                    if let Some((saved, src)) = crate::layout::storage::get_layout_with_source(dev_layout_clone.vendor_id, dev_layout_clone.product_id).await {
+                                                        *via_def_sig.write() = Some(saved.clone());
+                                                        layout_source_sig.set(src);
+                                                        let p_keys = crate::layout::kle::parse_kle(&saved.layouts.keymap);
+                                                        physical_keys_sig.set(p_keys.clone());
+                                                        status_sig.set(format!("Connected to {}", dev_layout_clone.product_string));
+                                                        reload_layer(*active_layer_sig.read(), dev_layout_clone.path.clone(), p_keys, layer_keycodes_sig, is_loading_layer_sig, status_sig);
+                                                    } else {
+                                                        *via_def_sig.write() = None;
+                                                        layout_source_sig.set(crate::layout::storage::LayoutSource::None);
+                                                        physical_keys_sig.set(Vec::new());
+                                                    }
+                                                });
 
                                                 let dev_path = dev.path.clone();
                                                 let pv = protocol_version.clone();
@@ -1021,18 +1031,28 @@ pub fn App() -> Element {
                                             fetch_keyboard_data(dev_path, pv, lc, mc, mbs, mb, dm).await;
                                         });
 
-                                        if let Some((saved, src)) = crate::layout::storage::get_layout_with_source(device.vendor_id, device.product_id) {
-                                            *via_def.write() = Some(saved.clone());
-                                            layout_source.set(src);
-                                            let p_keys = crate::layout::kle::parse_kle(&saved.layouts.keymap);
-                                            physical_keys.set(p_keys.clone());
-                                            status.set(format!("Connected to {}", device.product_string));
-                                            reload_layer(*active_layer.read(), device.path.clone(), p_keys, layer_keycodes, is_loading_layer, status);
-                                        } else {
-                                            *via_def.write() = None;
-                                            layout_source.set(crate::layout::storage::LayoutSource::None);
-                                            physical_keys.set(Vec::new());
-                                        }
+                                        let dev_layout_clone = device.clone();
+                                        let mut via_def_sig = via_def.clone();
+                                        let mut layout_source_sig = layout_source.clone();
+                                        let mut physical_keys_sig = physical_keys.clone();
+                                        let mut status_sig = status.clone();
+                                        let active_layer_sig = active_layer.clone();
+                                        let layer_keycodes_sig = layer_keycodes.clone();
+                                        let is_loading_layer_sig = is_loading_layer.clone();
+                                        spawn(async move {
+                                            if let Some((saved, src)) = crate::layout::storage::get_layout_with_source(dev_layout_clone.vendor_id, dev_layout_clone.product_id).await {
+                                                *via_def_sig.write() = Some(saved.clone());
+                                                layout_source_sig.set(src);
+                                                let p_keys = crate::layout::kle::parse_kle(&saved.layouts.keymap);
+                                                physical_keys_sig.set(p_keys.clone());
+                                                status_sig.set(format!("Connected to {}", dev_layout_clone.product_string));
+                                                reload_layer(*active_layer_sig.read(), dev_layout_clone.path.clone(), p_keys, layer_keycodes_sig, is_loading_layer_sig, status_sig);
+                                            } else {
+                                                *via_def_sig.write() = None;
+                                                layout_source_sig.set(crate::layout::storage::LayoutSource::None);
+                                                physical_keys_sig.set(Vec::new());
+                                            }
+                                        });
                                     }
                                 } },
                                 span { 
@@ -1433,7 +1453,9 @@ pub fn App() -> Element {
                                                         let code_opt = layer_keycodes.read().get(&(matrix_row as u8, matrix_col as u8)).copied();
                                                         let label_text = if let Some(code) = code_opt {
                                                             let l = crate::ui::keycodes::get_keycode_label(code, via_def.read().as_ref());
-                                                            if !l.is_empty() && code != 0 {
+                                                            if code == 0 {
+                                                                String::new()
+                                                            } else if !l.is_empty() {
                                                                 l
                                                             } else if !key.label.is_empty() {
                                                                 key.label.clone()
@@ -1546,7 +1568,7 @@ pub fn App() -> Element {
                                                 p { style: "grid-column: 1 / -1; color: #969696;", "No custom keycodes defined for this layout." }
                                             } else {
                                                 for (idx, custom) in def.custom_keycodes.iter().enumerate() {
-                                                    KeycodeButton { label: custom.short_name.clone(), title: custom.title.clone(), code: 0x5C00 + idx as u16, selected_key, physical_keys, selected_device, status, layer_keycodes, active_layer, dragged_keycode, show_any_modal, stored_keycodes, any_custom_text, via_def }
+                                                    KeycodeButton { label: custom.short_name.clone(), title: custom.title.clone(), code: 0x7E00 + idx as u16, selected_key, physical_keys, selected_device, status, layer_keycodes, active_layer, dragged_keycode, show_any_modal, stored_keycodes, any_custom_text, via_def }
                                                 }
                                             }
                                         }
