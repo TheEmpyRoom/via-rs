@@ -96,9 +96,7 @@ pub fn parse_kle(keymap: &serde_json::Value) -> Vec<PhysicalKey> {
                             }
                         }
 
-                        if label.is_empty() && matrix_row >= 0 && matrix_col >= 0 {
-                            label = format!("{},{}", matrix_row, matrix_col);
-                        }
+                        // Removed coordinate injection to allow blank labels
                         
                         keys.push(PhysicalKey {
                             x: current_x,
