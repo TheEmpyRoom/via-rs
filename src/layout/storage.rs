@@ -96,10 +96,19 @@ async fn fetch_layout_wasm(url: &str) -> Result<String, String> {
 
     let eval_code = format!(
         r#"
-        fetch('{}').then(res => {{
-            if (!res.ok) throw new Error('HTTP status ' + res.status);
-            return res.text();
-        }})
+        (function() {{
+            let path = window.location.pathname;
+            if (path.endsWith('.html')) {{
+                path = path.substring(0, path.lastIndexOf('/'));
+            }}
+            if (!path.endsWith('/')) {{
+                path += '/';
+            }}
+            return fetch(path + '{}').then(res => {{
+                if (!res.ok) throw new Error('HTTP status ' + res.status);
+                return res.text();
+            }})
+        }})()
         "#,
         url
     );
