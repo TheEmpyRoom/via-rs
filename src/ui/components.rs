@@ -367,6 +367,8 @@ pub fn App() -> Element {
     let mut any_custom_text = use_signal(|| "".to_string());
     let mut stored_keycodes = use_signal(|| HashMap::<(u8, u8, u8), u16>::new());
     let mut layout_source = use_signal(|| crate::layout::storage::LayoutSource::None);
+    let mut clipboard_layer = use_signal(|| None::<HashMap<(u8, u8), u16>>);
+    let mut layer_context_menu = use_signal(|| None::<(f64, f64, u8)>);
 
     #[cfg(not(target_arch = "wasm32"))]
     use_future(move || async move {
@@ -854,6 +856,134 @@ pub fn App() -> Element {
 
     rsx! {
         style { "{STYLE}" }
+        if let Some((x, y, target_layer)) = layer_context_menu.read().clone() {
+            div {
+                style: "position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 9998;",
+                onclick: move |e| {
+                    e.stop_propagation();
+                    layer_context_menu.set(None);
+                },
+                oncontextmenu: move |e| {
+                    e.prevent_default();
+                    layer_context_menu.set(None);
+                },
+                div {
+                    style: "position: absolute; left: {x}px; top: {y}px; z-index: 9999; background: #2c2c2e; border: 1px solid #444; border-radius: 6px; padding: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 2px;",
+                    div {
+                        class: "tree-item",
+                        style: "padding: 6px 12px; cursor: pointer; color: #fff; border-radius: 4px;",
+                        onclick: move |e| {
+                            e.stop_propagation();
+                            layer_context_menu.set(None);
+                            
+                            // COPY
+                            let dev_path = selected_device.read().as_ref().unwrap().path.clone();
+                            let p_keys = physical_keys.read().clone();
+                            let mut status_sig = status.clone();
+                            let mut clipboard_sig = clipboard_layer.clone();
+                            
+                            spawn(async move {
+                                status_sig.set(format!("Copying Layer {}...", target_layer));
+                                let mut map = HashMap::new();
+                                #[cfg(not(target_arch = "wasm32"))]
+                                {
+                                    if let Ok(api) = hidapi::HidApi::new() {
+                                        if let Ok(c_path) = std::ffi::CString::new(dev_path) {
+                                            if let Ok(device) = api.open_path(&c_path) {
+                                                let via = crate::hid::via_protocol::ViaKeyboard::new(&device);
+                                                for pk in &p_keys {
+                                                    let row = pk.matrix_row as u8;
+                                                    let col = pk.matrix_col as u8;
+                                                    if let Ok(code) = via.get_keycode(target_layer, row, col) {
+                                                        map.insert((row, col), code);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                #[cfg(target_arch = "wasm32")]
+                                {
+                                    let via = crate::hid::via_protocol::ViaKeyboard;
+                                    for pk in &p_keys {
+                                        let row = pk.matrix_row as u8;
+                                        let col = pk.matrix_col as u8;
+                                        if let Ok(code) = via.get_keycode_async(target_layer, row, col).await {
+                                            map.insert((row, col), code);
+                                        }
+                                    }
+                                }
+                                clipboard_sig.set(Some(map));
+                                status_sig.set(format!("Copied Layer {} to clipboard!", target_layer));
+                            });
+                        },
+                        "Copy Layer {target_layer}"
+                    }
+                    if clipboard_layer.read().is_some() {
+                        div {
+                            class: "tree-item",
+                            style: "padding: 6px 12px; cursor: pointer; color: #fff; border-radius: 4px;",
+                            onclick: move |e| {
+                                e.stop_propagation();
+                                layer_context_menu.set(None);
+                                
+                                // PASTE
+                                if let Some(map) = clipboard_layer.read().clone() {
+                                    let dev_path = selected_device.read().as_ref().unwrap().path.clone();
+                                    let mut status_sig = status.clone();
+                                    let is_active = target_layer == *active_layer.read();
+                                    let mut layer_keycodes_sig = layer_keycodes.clone();
+                                    let mut stored_keycodes_sig = stored_keycodes.clone();
+                                    
+                                    spawn(async move {
+                                        status_sig.set(format!("Pasting into Layer {}...", target_layer));
+                                        let mut count = 0;
+                                        
+                                        #[cfg(not(target_arch = "wasm32"))]
+                                        {
+                                            if let Ok(api) = hidapi::HidApi::new() {
+                                                if let Ok(c_path) = std::ffi::CString::new(dev_path) {
+                                                    if let Ok(device) = api.open_path(&c_path) {
+                                                        let via = crate::hid::via_protocol::ViaKeyboard::new(&device);
+                                                        for (&(row, col), &code) in &map {
+                                                            if via.set_keycode(target_layer, row, col, code).is_ok() {
+                                                                count += 1;
+                                                                stored_keycodes_sig.write().insert((target_layer, row, col), code);
+                                                                if is_active {
+                                                                    layer_keycodes_sig.write().insert((row, col), code);
+                                                                }
+                                                            }
+                                                        }
+                                                        let _ = via.custom_save(0, 0);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        #[cfg(target_arch = "wasm32")]
+                                        {
+                                            let via = crate::hid::via_protocol::ViaKeyboard;
+                                            for (&(row, col), &code) in &map {
+                                                if via.set_keycode_async(target_layer, row, col, code).await.is_ok() {
+                                                    count += 1;
+                                                    stored_keycodes_sig.write().insert((target_layer, row, col), code);
+                                                    if is_active {
+                                                        layer_keycodes_sig.write().insert((row, col), code);
+                                                    }
+                                                    gloo_timers::future::TimeoutFuture::new(10).await;
+                                                }
+                                            }
+                                            let _ = via.custom_save_async(0, 0).await;
+                                        }
+                                        status_sig.set(format!("Pasted {} keys into Layer {}!", count, target_layer));
+                                    });
+                                }
+                            },
+                            "Paste to Layer {target_layer}"
+                        }
+                    }
+                }
+            }
+        }
         div {
             class: format!("app-container {}", if dragged_keycode.read().is_some() { "dragging-keycode" } else { "" }),
             onmouseup: move |_| {
@@ -1090,6 +1220,12 @@ pub fn App() -> Element {
                                                         active_layer.set(l);
                                                         let p_keys = physical_keys.read().clone();
                                                         reload_layer(l, p_path.clone(), p_keys, layer_keycodes, is_loading_layer, status);
+                                                    },
+                                                    oncontextmenu: move |e| {
+                                                        e.stop_propagation();
+                                                        e.prevent_default();
+                                                        let pos = e.page_coordinates();
+                                                        layer_context_menu.set(Some((pos.x, pos.y, l)));
                                                     },
                                                     span { class: "tree-label", "Layer {l}" }
                                                 }
