@@ -369,6 +369,8 @@ pub fn App() -> Element {
     let mut layout_source = use_signal(|| crate::layout::storage::LayoutSource::None);
     let mut clipboard_layer = use_signal(|| None::<HashMap<(u8, u8), u16>>);
     let mut layer_context_menu = use_signal(|| None::<(f64, f64, u8)>);
+    let mut clipboard_macro = use_signal(|| None::<String>);
+    let mut macro_context_menu = use_signal(|| None::<(f64, f64, u8)>);
 
     #[cfg(not(target_arch = "wasm32"))]
     use_future(move || async move {
@@ -984,6 +986,111 @@ pub fn App() -> Element {
                 }
             }
         }
+        if let Some((x, y, target_macro)) = macro_context_menu.read().clone() {
+            div {
+                style: "position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 9998;",
+                onclick: move |e| {
+                    e.stop_propagation();
+                    macro_context_menu.set(None);
+                },
+                oncontextmenu: move |e| {
+                    e.prevent_default();
+                    macro_context_menu.set(None);
+                },
+                div {
+                    style: "position: absolute; left: {x}px; top: {y}px; z-index: 9999; background: #2c2c2e; border: 1px solid #444; border-radius: 6px; padding: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 2px;",
+                    div {
+                        class: "tree-item",
+                        style: "padding: 6px 12px; cursor: pointer; color: #fff; border-radius: 4px;",
+                        onclick: move |e| {
+                            e.stop_propagation();
+                            macro_context_menu.set(None);
+                            
+                            // COPY MACRO
+                            let m_text = decoded_macros.read()[target_macro as usize].clone();
+                            clipboard_macro.set(Some(m_text));
+                            status.set(format!("Copied Macro {} to clipboard!", target_macro));
+                        },
+                        "Copy Macro {target_macro}"
+                    }
+                    if clipboard_macro.read().is_some() {
+                        div {
+                            class: "tree-item",
+                            style: "padding: 6px 12px; cursor: pointer; color: #fff; border-radius: 4px;",
+                            onclick: move |e| {
+                                e.stop_propagation();
+                                macro_context_menu.set(None);
+                                
+                                // PASTE MACRO
+                                if let Some(m_text) = clipboard_macro.read().clone() {
+                                    let mut dm_sig = decoded_macros.clone();
+                                    dm_sig.write()[target_macro as usize] = m_text.clone();
+                                    
+                                    let dev_info = selected_device.read().clone();
+                                    let mut status_sig = status.clone();
+                                    let prot = *protocol_version.read();
+                                    let mc = *macro_count.read();
+                                    let mbs = *macro_buffer_size.read();
+                                    let mut mb_sig = macro_buffer.clone();
+                                    
+                                    spawn(async move {
+                                        status_sig.set(format!("Pasting into Macro {}...", target_macro));
+                                        
+                                        if let Some(dev) = dev_info {
+                                            let macros_encoded: Vec<Vec<u8>> = dm_sig.read().iter().map(|s| crate::layout::macro_parser::encode_macro(s, prot)).collect();
+                                            let new_buf = crate::layout::macro_parser::build_macro_buffer(&macros_encoded, mc, mbs);
+                                            mb_sig.set(new_buf.clone());
+                                            
+                                            #[cfg(not(target_arch = "wasm32"))]
+                                            if let Ok(api) = hidapi::HidApi::new() {
+                                                if let Ok(c_path) = std::ffi::CString::new(dev.path) {
+                                                    if let Ok(device) = api.open_path(&c_path) {
+                                                        let via = crate::hid::via_protocol::ViaKeyboard::new(&device);
+                                                        let mut success = true;
+                                                        for offset in (0..new_buf.len()).step_by(28) {
+                                                            let chunk_size = std::cmp::min(28, new_buf.len() - offset);
+                                                            let chunk = &new_buf[offset..offset + chunk_size];
+                                                            if via.set_macro_buffer(offset as u16, chunk).is_err() {
+                                                                success = false;
+                                                                break;
+                                                            }
+                                                            std::thread::sleep(std::time::Duration::from_millis(10));
+                                                        }
+                                                        if success {
+                                                            let _ = via.custom_save(0, 0);
+                                                            status_sig.set(format!("Pasted into Macro {} successfully!", target_macro));
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            #[cfg(target_arch = "wasm32")]
+                                            {
+                                                let via = crate::hid::via_protocol::ViaKeyboard;
+                                                let mut success = true;
+                                                for offset in (0..new_buf.len()).step_by(28) {
+                                                    let chunk_size = std::cmp::min(28, new_buf.len() - offset);
+                                                    let chunk = &new_buf[offset..offset + chunk_size];
+                                                    if via.set_macro_buffer_async(offset as u16, chunk).await.is_err() {
+                                                        success = false;
+                                                        break;
+                                                    }
+                                                    gloo_timers::future::TimeoutFuture::new(15).await;
+                                                }
+                                                if success {
+                                                    let _ = via.custom_save_async(0, 0).await;
+                                                    status_sig.set(format!("Pasted into Macro {} successfully!", target_macro));
+                                                }
+                                            }
+                                        }
+                                    });
+                                }
+                            },
+                            "Paste to Macro {target_macro}"
+                        }
+                    }
+                }
+            }
+        }
         div {
             class: format!("app-container {}", if dragged_keycode.read().is_some() { "dragging-keycode" } else { "" }),
             onmouseup: move |_| {
@@ -1252,6 +1359,12 @@ pub fn App() -> Element {
                                                     class: if *active_main_tab.read() == format!("Macro {}", m) { "tree-item leaf-node active" } else { "tree-item leaf-node" },
                                                     onclick: move |_| {
                                                         active_main_tab.set(format!("Macro {}", m));
+                                                    },
+                                                    oncontextmenu: move |e| {
+                                                        e.stop_propagation();
+                                                        e.prevent_default();
+                                                        let pos = e.page_coordinates();
+                                                        macro_context_menu.set(Some((pos.x, pos.y, m)));
                                                     },
                                                     span { class: "tree-label", "Macro {m}" }
                                                 }
