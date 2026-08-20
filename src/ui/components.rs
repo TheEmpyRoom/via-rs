@@ -36,6 +36,21 @@ fn base64_encode(bytes: &[u8]) -> String {
     res
 }
 
+fn get_next_key_in_matrix(p_keys: &[PhysicalKey], curr: &PhysicalKey) -> Option<PhysicalKey> {
+    let mut sorted_keys = p_keys.to_vec();
+    sorted_keys.sort_by(|a, b| a.matrix_row.cmp(&b.matrix_row).then(a.matrix_col.cmp(&b.matrix_col)));
+    if let Some(pos) = sorted_keys.iter().position(|pk| pk.matrix_row == curr.matrix_row && pk.matrix_col == curr.matrix_col) {
+        let next_pos = pos + 1;
+        if next_pos < sorted_keys.len() {
+            Some(sorted_keys[next_pos].clone())
+        } else {
+            Some(sorted_keys[0].clone())
+        }
+    } else {
+        None
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 struct FeatureBackupValue {
     label: String,
@@ -276,13 +291,8 @@ fn KeycodeButton(
                                                 status.set(format!("Assigned {} to {},{}", l, row, col));
                                                 
                                                 let p_keys = physical_keys_sig.read().clone();
-                                                if let Some(pos) = p_keys.iter().position(|pk| pk.matrix_row == k.matrix_row && pk.matrix_col == k.matrix_col) {
-                                                    let next_pos = pos + 1;
-                                                    if next_pos < p_keys.len() {
-                                                        selected_key_sig.set(Some(p_keys[next_pos].clone()));
-                                                    } else {
-                                                        selected_key_sig.set(Some(p_keys[0].clone()));
-                                                    }
+                                                if let Some(next_k) = get_next_key_in_matrix(&p_keys, &k) {
+                                                    selected_key_sig.set(Some(next_k));
                                                 }
                                             },
                                             Err(e) => status.set(format!("Error writing: {}", e)),
@@ -301,13 +311,8 @@ fn KeycodeButton(
                                         status.set(format!("Saved {} to {},{} in EEPROM", l, row, col));
 
                                         let p_keys = physical_keys_sig.read().clone();
-                                        if let Some(pos) = p_keys.iter().position(|pk| pk.matrix_row == k.matrix_row && pk.matrix_col == k.matrix_col) {
-                                            let next_pos = pos + 1;
-                                            if next_pos < p_keys.len() {
-                                                selected_key_sig.set(Some(p_keys[next_pos].clone()));
-                                            } else {
-                                                selected_key_sig.set(Some(p_keys[0].clone()));
-                                            }
+                                        if let Some(next_k) = get_next_key_in_matrix(&p_keys, &k) {
+                                            selected_key_sig.set(Some(next_k));
                                         }
                                     },
                                     Err(e) => status.set(format!("Error writing: {}", e)),
@@ -2147,11 +2152,8 @@ pub fn App() -> Element {
                                                                                 status_sig.set(format!("Saved custom keycode 0x{:04X} ({}) to {},{} in EEPROM", c, label_str, row, col));
                                                                                 
                                                                                 let p_keys = physical_keys_sig.read().clone();
-                                                                                if let Some(pos) = p_keys.iter().position(|pk| pk.matrix_row == k.matrix_row && pk.matrix_col == k.matrix_col) {
-                                                                                    let next_pos = pos + 1;
-                                                                                    if next_pos < p_keys.len() {
-                                                                                        selected_key_sig.set(Some(p_keys[next_pos].clone()));
-                                                                                    }
+                                                                                if let Some(next_k) = get_next_key_in_matrix(&p_keys, &k) {
+                                                                                    selected_key_sig.set(Some(next_k));
                                                                                 }
                                                                             },
                                                                             Err(e) => status_sig.set(format!("Error writing: {}", e)),
@@ -2169,11 +2171,8 @@ pub fn App() -> Element {
                                                                         status_sig.set(format!("Saved custom keycode 0x{:04X} ({}) to {},{} in EEPROM", c, label_str, row, col));
                                                                         
                                                                         let p_keys = physical_keys_sig.read().clone();
-                                                                        if let Some(pos) = p_keys.iter().position(|pk| pk.matrix_row == k.matrix_row && pk.matrix_col == k.matrix_col) {
-                                                                            let next_pos = pos + 1;
-                                                                            if next_pos < p_keys.len() {
-                                                                                selected_key_sig.set(Some(p_keys[next_pos].clone()));
-                                                                            }
+                                                                        if let Some(next_k) = get_next_key_in_matrix(&p_keys, &k) {
+                                                                            selected_key_sig.set(Some(next_k));
                                                                         }
                                                                     },
                                                                     Err(e) => status_sig.set(format!("Error writing: {}", e)),
