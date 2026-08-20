@@ -376,6 +376,10 @@ pub fn App() -> Element {
     let mut layer_context_menu = use_signal(|| None::<(f64, f64, u8)>);
     let mut clipboard_macro = use_signal(|| None::<String>);
     let mut macro_context_menu = use_signal(|| None::<(f64, f64, u8)>);
+    let mut clipboard_all_layers = use_signal(|| None::<HashMap<u8, HashMap<(u8, u8), u16>>>);
+    let mut all_layers_context_menu = use_signal(|| None::<(f64, f64)>);
+    let mut clipboard_all_macros = use_signal(|| None::<Vec<String>>);
+    let mut all_macros_context_menu = use_signal(|| None::<(f64, f64)>);
 
     #[cfg(not(target_arch = "wasm32"))]
     use_future(move || async move {
@@ -1096,6 +1100,263 @@ pub fn App() -> Element {
                 }
             }
         }
+        if let Some((x, y)) = all_layers_context_menu.read().clone() {
+            div {
+                style: "position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 9998;",
+                onclick: move |e| {
+                    e.stop_propagation();
+                    all_layers_context_menu.set(None);
+                },
+                oncontextmenu: move |e| {
+                    e.prevent_default();
+                    all_layers_context_menu.set(None);
+                },
+                div {
+                    style: "position: absolute; left: {x}px; top: {y}px; z-index: 9999; background: #2c2c2e; border: 1px solid #444; border-radius: 6px; padding: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 2px;",
+                    div {
+                        class: "tree-item",
+                        style: "padding: 6px 12px; cursor: pointer; color: #fff; border-radius: 4px;",
+                        onclick: move |e| {
+                            e.stop_propagation();
+                            all_layers_context_menu.set(None);
+                            
+                            // COPY ALL LAYERS
+                            let dev_path = selected_device.read().as_ref().unwrap().path.clone();
+                            let p_keys = physical_keys.read().clone();
+                            let mut status_sig = status.clone();
+                            let mut clipboard_sig = clipboard_all_layers.clone();
+                            let l_count = *layer_count.read();
+                            
+                            spawn(async move {
+                                status_sig.set(format!("Copying All {} Layers...", l_count));
+                                let mut all_map = HashMap::new();
+                                #[cfg(not(target_arch = "wasm32"))]
+                                {
+                                    if let Ok(api) = hidapi::HidApi::new() {
+                                        if let Ok(c_path) = std::ffi::CString::new(dev_path) {
+                                            if let Ok(device) = api.open_path(&c_path) {
+                                                let via = crate::hid::via_protocol::ViaKeyboard::new(&device);
+                                                for layer in 0..l_count {
+                                                    let mut l_map = HashMap::new();
+                                                    for pk in &p_keys {
+                                                        let row = pk.matrix_row as u8;
+                                                        let col = pk.matrix_col as u8;
+                                                        if let Ok(code) = via.get_keycode(layer, row, col) {
+                                                            l_map.insert((row, col), code);
+                                                        }
+                                                    }
+                                                    all_map.insert(layer, l_map);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                #[cfg(target_arch = "wasm32")]
+                                {
+                                    let via = crate::hid::via_protocol::ViaKeyboard;
+                                    for layer in 0..l_count {
+                                        let mut l_map = HashMap::new();
+                                        for pk in &p_keys {
+                                            let row = pk.matrix_row as u8;
+                                            let col = pk.matrix_col as u8;
+                                            if let Ok(code) = via.get_keycode_async(layer, row, col).await {
+                                                l_map.insert((row, col), code);
+                                            }
+                                        }
+                                        all_map.insert(layer, l_map);
+                                    }
+                                }
+                                clipboard_sig.set(Some(all_map));
+                                status_sig.set(format!("Copied all {} layers to clipboard!", l_count));
+                            });
+                        },
+                        "Copy All Layers"
+                    }
+                    if clipboard_all_layers.read().is_some() {
+                        div {
+                            class: "tree-item",
+                            style: "padding: 6px 12px; cursor: pointer; color: #fff; border-radius: 4px;",
+                            onclick: move |e| {
+                                e.stop_propagation();
+                                all_layers_context_menu.set(None);
+                                
+                                // PASTE ALL LAYERS
+                                if let Some(all_map) = clipboard_all_layers.read().clone() {
+                                    let dev_path = selected_device.read().as_ref().unwrap().path.clone();
+                                    let mut status_sig = status.clone();
+                                    let active = *active_layer.read();
+                                    let mut layer_keycodes_sig = layer_keycodes.clone();
+                                    let mut stored_keycodes_sig = stored_keycodes.clone();
+                                    let l_count = *layer_count.read();
+                                    
+                                    spawn(async move {
+                                        status_sig.set("Pasting all layers...".to_string());
+                                        let mut count = 0;
+                                        
+                                        #[cfg(not(target_arch = "wasm32"))]
+                                        {
+                                            if let Ok(api) = hidapi::HidApi::new() {
+                                                if let Ok(c_path) = std::ffi::CString::new(dev_path) {
+                                                    if let Ok(device) = api.open_path(&c_path) {
+                                                        let via = crate::hid::via_protocol::ViaKeyboard::new(&device);
+                                                        for layer in 0..l_count {
+                                                            if let Some(map) = all_map.get(&layer) {
+                                                                for (&(row, col), &code) in map {
+                                                                    if via.set_keycode(layer, row, col, code).is_ok() {
+                                                                        count += 1;
+                                                                        stored_keycodes_sig.write().insert((layer, row, col), code);
+                                                                        if layer == active {
+                                                                            layer_keycodes_sig.write().insert((row, col), code);
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                        let _ = via.custom_save(0, 0);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        #[cfg(target_arch = "wasm32")]
+                                        {
+                                            let via = crate::hid::via_protocol::ViaKeyboard;
+                                            for layer in 0..l_count {
+                                                if let Some(map) = all_map.get(&layer) {
+                                                    for (&(row, col), &code) in map {
+                                                        if via.set_keycode_async(layer, row, col, code).await.is_ok() {
+                                                            count += 1;
+                                                            stored_keycodes_sig.write().insert((layer, row, col), code);
+                                                            if layer == active {
+                                                                layer_keycodes_sig.write().insert((row, col), code);
+                                                            }
+                                                            gloo_timers::future::TimeoutFuture::new(10).await;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            let _ = via.custom_save_async(0, 0).await;
+                                        }
+                                        status_sig.set(format!("Pasted {} keys across all layers!", count));
+                                    });
+                                }
+                            },
+                            "Paste All Layers"
+                        }
+                    }
+                }
+            }
+        }
+        if let Some((x, y)) = all_macros_context_menu.read().clone() {
+            div {
+                style: "position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 9998;",
+                onclick: move |e| {
+                    e.stop_propagation();
+                    all_macros_context_menu.set(None);
+                },
+                oncontextmenu: move |e| {
+                    e.prevent_default();
+                    all_macros_context_menu.set(None);
+                },
+                div {
+                    style: "position: absolute; left: {x}px; top: {y}px; z-index: 9999; background: #2c2c2e; border: 1px solid #444; border-radius: 6px; padding: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 2px;",
+                    div {
+                        class: "tree-item",
+                        style: "padding: 6px 12px; cursor: pointer; color: #fff; border-radius: 4px;",
+                        onclick: move |e| {
+                            e.stop_propagation();
+                            all_macros_context_menu.set(None);
+                            
+                            // COPY ALL MACROS
+                            let all_m = decoded_macros.read().clone();
+                            clipboard_all_macros.set(Some(all_m));
+                            status.set("Copied all Macros to clipboard!".to_string());
+                        },
+                        "Copy All Macros"
+                    }
+                    if clipboard_all_macros.read().is_some() {
+                        div {
+                            class: "tree-item",
+                            style: "padding: 6px 12px; cursor: pointer; color: #fff; border-radius: 4px;",
+                            onclick: move |e| {
+                                e.stop_propagation();
+                                all_macros_context_menu.set(None);
+                                
+                                // PASTE ALL MACROS
+                                if let Some(all_m) = clipboard_all_macros.read().clone() {
+                                    let mut dm_sig = decoded_macros.clone();
+                                    
+                                    // Make sure we paste only up to macro_count
+                                    let mut target = dm_sig.read().clone();
+                                    for i in 0..std::cmp::min(all_m.len(), *macro_count.read() as usize) {
+                                        target[i] = all_m[i].clone();
+                                    }
+                                    dm_sig.set(target);
+                                    
+                                    let dev_info = selected_device.read().clone();
+                                    let mut status_sig = status.clone();
+                                    let prot = *protocol_version.read();
+                                    let mc = *macro_count.read();
+                                    let mbs = *macro_buffer_size.read();
+                                    let mut mb_sig = macro_buffer.clone();
+                                    
+                                    spawn(async move {
+                                        status_sig.set("Pasting all Macros...".to_string());
+                                        
+                                        if let Some(dev) = dev_info {
+                                            let macros_encoded: Vec<Vec<u8>> = dm_sig.read().iter().map(|s| crate::layout::macro_parser::encode_macro(s, prot)).collect();
+                                            let new_buf = crate::layout::macro_parser::build_macro_buffer(&macros_encoded, mc, mbs);
+                                            mb_sig.set(new_buf.clone());
+                                            
+                                            #[cfg(not(target_arch = "wasm32"))]
+                                            if let Ok(api) = hidapi::HidApi::new() {
+                                                if let Ok(c_path) = std::ffi::CString::new(dev.path) {
+                                                    if let Ok(device) = api.open_path(&c_path) {
+                                                        let via = crate::hid::via_protocol::ViaKeyboard::new(&device);
+                                                        let mut success = true;
+                                                        for offset in (0..new_buf.len()).step_by(28) {
+                                                            let chunk_size = std::cmp::min(28, new_buf.len() - offset);
+                                                            let chunk = &new_buf[offset..offset + chunk_size];
+                                                            if via.set_macro_buffer(offset as u16, chunk).is_err() {
+                                                                success = false;
+                                                                break;
+                                                            }
+                                                            std::thread::sleep(std::time::Duration::from_millis(10));
+                                                        }
+                                                        if success {
+                                                            let _ = via.custom_save(0, 0);
+                                                            status_sig.set("Pasted all Macros successfully!".to_string());
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            #[cfg(target_arch = "wasm32")]
+                                            {
+                                                let via = crate::hid::via_protocol::ViaKeyboard;
+                                                let mut success = true;
+                                                for offset in (0..new_buf.len()).step_by(28) {
+                                                    let chunk_size = std::cmp::min(28, new_buf.len() - offset);
+                                                    let chunk = &new_buf[offset..offset + chunk_size];
+                                                    if via.set_macro_buffer_async(offset as u16, chunk).await.is_err() {
+                                                        success = false;
+                                                        break;
+                                                    }
+                                                    gloo_timers::future::TimeoutFuture::new(15).await;
+                                                }
+                                                if success {
+                                                    let _ = via.custom_save_async(0, 0).await;
+                                                    status_sig.set("Pasted all Macros successfully!".to_string());
+                                                }
+                                            }
+                                        }
+                                    });
+                                }
+                            },
+                            "Paste All Macros"
+                        }
+                    }
+                }
+            }
+        }
         div {
             class: format!("app-container {}", if dragged_keycode.read().is_some() { "dragging-keycode" } else { "" }),
             onmouseup: move |_| {
@@ -1319,6 +1580,12 @@ pub fn App() -> Element {
                                                     if nodes.contains(&layers_id_clone) { nodes.remove(&layers_id_clone); } else { nodes.insert(layers_id_clone.clone()); }
                                                 }
                                             },
+                                            oncontextmenu: move |e| {
+                                                e.stop_propagation();
+                                                e.prevent_default();
+                                                let pos = e.page_coordinates();
+                                                all_layers_context_menu.set(Some((pos.x, pos.y)));
+                                            },
                                             span { class: if expanded_nodes.read().contains(&layers_id) { "chevron expanded" } else { "chevron collapsed" }, "▶" }
                                             span { class: "tree-label", "Layers" }
                                         }
@@ -1353,6 +1620,12 @@ pub fn App() -> Element {
                                                     let mut nodes = expanded_nodes.write();
                                                     if nodes.contains(&macros_id_clone) { nodes.remove(&macros_id_clone); } else { nodes.insert(macros_id_clone.clone()); }
                                                 }
+                                            },
+                                            oncontextmenu: move |e| {
+                                                e.stop_propagation();
+                                                e.prevent_default();
+                                                let pos = e.page_coordinates();
+                                                all_macros_context_menu.set(Some((pos.x, pos.y)));
                                             },
                                             span { class: if expanded_nodes.read().contains(&macros_id) { "chevron expanded" } else { "chevron collapsed" }, "▶" }
                                             span { class: "tree-label", "Macros" }
